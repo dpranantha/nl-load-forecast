@@ -32,6 +32,10 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
+markers = [
+    "integration: marks tests as live external integration tests (deselect with '-m \"not integration\"')",
+]
+
 [tool.ruff]
 line-length = 100
 

@@ -12,6 +12,7 @@ import pandas as pd
 import requests
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+FORECAST_URL = "https://api.open-meteo.com/v1/forecast" 
 
 
 def _cache_path(cache_dir: str, lat: float, lon: float, start: str, end: str) -> Path:
@@ -27,6 +28,7 @@ def fetch_weather(
     variables: list[str],
     timezone: str,
     cache_dir: str = "data",
+    url: str = ARCHIVE_URL,
 ) -> pd.DataFrame:
     """Return an hourly, tz-aware DataFrame of the requested weather variables."""
     cache = _cache_path(cache_dir, latitude, longitude, start, end)
@@ -41,7 +43,7 @@ def fetch_weather(
         "hourly": ",".join(variables),
         "timezone": timezone,
     }
-    resp = requests.get(ARCHIVE_URL, params=params, timeout=60)
+    resp = requests.get(url, params=params, timeout=60)
     resp.raise_for_status()
     hourly = resp.json()["hourly"]
 
