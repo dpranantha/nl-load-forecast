@@ -152,8 +152,35 @@ nl-load-forecast/
 │   └── run_backtest.py
 └── tests/
     ├── test_metrics.py           # pinball/coverage/CRPS correctness
-    └── test_features.py
+    ├── test_features.py          # build_features, calendar, lags, leakage guard
+    ├── test_weather_api.py       # Open-Meteo unit tests (mocked HTTP, caching)
+    └── integration/
+        └── test_weather_api_integration.py  # live archive + forecast endpoints
 ```
+
+---
+
+## Testing
+
+**18 unit tests** (pure maths + synthetic data, no tokens or network):
+
+```bash
+make test                       # or: pytest -q
+```
+
+Tests cover metrics (pinball, coverage, CRPS), feature engineering (lags, rolling, momentum,
+weather-derived, calendar/holiday), the horizon-safe leakage guard, and the Open-Meteo weather
+client (response parsing, parquet caching, HTTP error propagation — all mocked).
+
+**2 integration tests** hit the live Open-Meteo API (archive + forecast endpoints) and are
+excluded from CI by default:
+
+```bash
+pytest -m integration -v        # needs network; not run in CI
+```
+
+CI (`-m "not integration"`) runs lint + the 18 unit tests on every push/PR — no secrets or
+native libs required.
 
 ---
 
@@ -163,12 +190,14 @@ nl-load-forecast/
 |---|---|
 | Probabilistic / quantile forecasting | `models/quantile_lgbm.py`, `evaluation/metrics.py` |
 | Time-series rigour (no leakage) | `backtest/rolling.py` walk-forward + horizon-shifted features in `features/build.py`, guarded by `test_rolling_features_are_horizon_safe` |
-| Weather/NWP-driven modelling | `data/weather.py`; derived degree-hours + wind-chill interaction in `features/build.py`; feature importances in the run |
+| Weather/NWP-driven modelling | `data/weather.py` (archive + forecast endpoints, parquet cache); derived degree-hours + wind-chill interaction in `features/build.py`; unit tests (`test_weather_api.py`) + live integration tests (`integration/test_weather_api_integration.py`) |
 | Feature-selection judgment | `wind_speed³` deliberately omitted — a no-op for tree splits (see `_weather_derived_features`) |
 | Databricks + Spark | `notebooks/01_databricks_walkthrough.py` |
 | MLflow tracking + registry | `pipeline.py` |
+| Calendar-aware features (NL holidays, cyclical encoding) | `_calendar_features` in `features/build.py`; tested against known Dutch holidays (Koningsdag, Kerstdag) in `test_features.py` |
 | Feature Store | notebook (Databricks Feature Engineering) |
 | Calibration as the metric that matters | reports + Results table |
+| Testing discipline (unit + integration, CI) | 18 unit tests (mocked, synthetic), 2 live integration tests, CI on every push with `pytest -m "not integration"` |
 
 ---
 
