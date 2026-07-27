@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from nl_load_forecast.config import FeaturesConfig
-from nl_load_forecast.features.build import build_features, split_xy
+from nl_load_forecast.features.build import build_features, split_xy, _calendar_features
 
 
 def _fake_data(n=500):
@@ -105,3 +105,59 @@ def test_feature_flags_toggle_off():
     assert not any(c.startswith(("load_mw_diff", "load_mw_rollstd")) for c in frame.columns)
     for col in ("hdh", "cdh", "wind_chill"):
         assert col not in frame.columns
+
+def test_calendar_features_holidays_and_weekends():
+    """Verify that known Dutch holidays and weekends are correctly flagged."""
+    # Test dates across 2023:
+    # 1. 2023-01-01: New Year's Day (Sunday) -> Holiday=1, Weekend=1
+    # 2. 2023-04-27: King's Day (Koningsdag) (Thursday) -> Holiday=1, Weekend=0
+    # 3. 2023-12-25: Christmas Day (Eerste Kerstdag) (Monday) -> Holiday=1, Weekend=0
+    # 4. 2023-05-17: Regular Wednesday -> Holiday=0, Weekend=0
+    dates = [
+        "2023-01-01 12:00:00",
+        "2023-04-27 09:00:00",
+        "2023-12-25 18:00:00",
+        "2023-05-17 14:00:00",
+    ]
+    idx = pd.DatetimeIndex(dates, tz="Europe/Amsterdam")
+
+    df = _calendar_features(idx)
+
+    # 1. Verify Holiday Flagging
+    assert df.loc["2023-01-01 12:00:00", "is_holiday"] == 1  # New Year's Day
+    assert df.loc["2023-04-27 09:00:00", "is_holiday"] == 1  # Koningsdag
+    assert df.loc["2023-12-25 18:00:00", "is_holiday"] == 1  # Christmas Day
+    assert df.loc["2023-05-17 14:00:00", "is_holiday"] == 0  # Regular Wednesday
+
+    # 2. Verify Weekend Flagging
+    assert df.loc["2023-01-01 12:00:00", "is_weekend"] == 1  # Sunday
+    assert df.loc["2023-04-27 09:00:00", "is_weekend"] == 0  # Thursday
+    assert df.loc["2023-12-25 18:00:00", "is_weekend"] == 0  # Monday
+
+
+def test_calendar_features_structure_and_cyclical_encoding():
+    """Verify shape, hour bounds, and cyclical sin/cos encodings."""
+    idx = pd.date_range("2023-01-01", "2023-01-02", freq="h", tz="Europe/Amsterdam")
+    df = _calendar_features(idx)
+
+    # Check columns structure
+    expected_cols = [
+        "hour",
+        "dayofweek",
+        "month",
+        "is_weekend",
+        "is_holiday",
+        "hour_sin",
+        "hour_cos",
+    ]
+    assert list(df.columns) == expected_cols
+    assert len(df) == 25
+
+    # Check cyclical boundary continuity: sin(0) == 0, cos(0) == 1
+    hour_0 = df[df["hour"] == 0].iloc[0]
+    np.testing.assert_allclose(hour_0["hour_sin"], 0.0, atol=1e-5)
+    np.testing.assert_allclose(hour_0["hour_cos"], 1.0, atol=1e-5)
+
+    # Check hour 6: sin(6*2pi/24) == sin(pi/2) == 1.0
+    hour_6 = df[df["hour"] == 6].iloc[0]
+    np.testing.assert_allclose(hour_6["hour_sin"], 1.0, atol=1e-5)
