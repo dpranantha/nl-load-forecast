@@ -9,5 +9,4 @@ data/*.csv
 .pytest_cache/
 .ruff_cache/
 .DS_Store
-.github
 src/nl_load_forecast.egg-info
