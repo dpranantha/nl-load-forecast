@@ -7,7 +7,7 @@ name = "nl-load-forecast"
 version = "0.1.0"
 description = "Probabilistic day-ahead electricity load forecasting for the Netherlands"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "entsoe-py>=0.8.0",
     "pandas>=2.2.0",
@@ -39,3 +39,8 @@ line-length = 100
 # Enable E (incl. E402) + F explicitly so behaviour is deterministic across ruff versions.
 # pipeline.py sets matplotlib's backend before importing pyplot, so its `# noqa: E402` is real.
 select = ["E", "F"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.0",
+]
