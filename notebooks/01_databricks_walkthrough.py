@@ -55,6 +55,34 @@ fe.create_table(
 )
 
 # COMMAND ----------
+# MAGIC %md ## (Advanced) Point-in-time lookup with `create_training_set`
+# MAGIC The pipeline's `data.feature_table` flag does a simple **snapshot read** of the table above.
+# MAGIC The fuller, leakage-safe online/offline pattern instead builds a **training set** from
+# MAGIC `FeatureLookup`s joined to a *label* DataFrame on the timestamp key. This records feature
+# MAGIC lineage, so the **same** lookups can be replayed at serving time and the online model reads
+# MAGIC exactly the features it was trained on.
+# MAGIC
+# MAGIC This cell is illustrative — it's a roadmap item, not yet wired into `run()`.
+
+# COMMAND ----------
+from databricks.feature_engineering import FeatureLookup
+
+# Label DataFrame: the join key + the target only. Features are pulled in via the lookup.
+labels_sdf = load_sdf.select("timestamp", cfg.features.target)
+
+lookups = [FeatureLookup(table_name="main.default.nl_load_features",
+                         lookup_key="timestamp")]
+
+training_set = fe.create_training_set(
+    df=labels_sdf,
+    feature_lookups=lookups,
+    label=cfg.features.target,
+    exclude_columns=["timestamp"],
+)
+train_pdf = training_set.load_df().toPandas()
+display(train_pdf)
+
+# COMMAND ----------
 # MAGIC %md ## Backtest + MLflow logging
 # MAGIC Reuses the packaged pipeline so the metrics match the local run exactly.
 # MAGIC
