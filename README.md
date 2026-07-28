@@ -240,10 +240,11 @@ them explicitly (rather than letting them read as "done"):
   coverage is proven *inside the backtest* (`backtest/rolling.py`), but the registered model is raw
   LightGBM — to serve calibrated intervals you must re-derive the margin from a recent calibration
   slice at inference time. The backtest demonstrates calibration; the artifact does not yet carry it.
+  How to fix: [Closing the gaps §2](#closing-the-gaps-design-notes).
 - **Feature Store is a demo, not a round-trip, unless configured.** The notebook *registers* a
   feature table, and `data.feature_table` lets the pipeline *read* from it on a cluster (above) — but
   the leakage-safe **point-in-time lookup** path is illustrated, not wired in. Off Databricks the
-  Feature Store is not used at all.
+  Feature Store is not used at all. How to fix: [Closing the gaps §1](#closing-the-gaps-design-notes).
 - **Median bias.** CQR calibrates the *interval*, not the point: the P50 empirical coverage sits near
   0.41, i.e. the median runs slightly high. Symmetric CQR also over-covers (0.87 vs 0.80) because the
   raw miscoverage is asymmetric.
@@ -253,6 +254,89 @@ them explicitly (rather than letting them read as "done"):
   hourly rows) but would need revisiting for a national, multi-zone model.
 
 These map onto the roadmap below.
+
+---
+
+## Closing the gaps (design notes)
+
+Two of the limitations above — snapshot feature reads and backtest-only CQR — are the ones that
+matter for a real deployment. Here's how I'd close each. These are design notes, not implemented
+code.
+
+### 1. Making the Feature Store read point-in-time safe
+
+**Why the snapshot read leaks.** `fe.read_table(...)` returns the table's *current* state. If the
+table is ever updated — weather archives get revised, load actuals get backfilled — a read at
+training time sees values that were **not available at the forecast origin**. For a day-ahead model
+that silently injects future information. The offline `build_features` already shifts target-derived
+features by the full horizon, but that discipline is lost the moment a mutable table is read as-is.
+
+**The fix: an as-of join against a time series feature table.** Register the table with a
+`timestamp_keys` (and an entity key — a constant `zone="NL"` today, real zones later), then look it
+up with a `timestamp_lookup_key`. Databricks then serves, for each label row at time *t*, the latest
+feature whose timestamp is `<= t` — never a later revision:
+
+```python
+# Register as a *time series* feature table (note timestamp_keys).
+fe.create_table(
+    name="main.default.nl_load_features",
+    primary_keys=["zone"],
+    timestamp_keys=["timestamp"],
+    df=joined.withColumn("zone", F.lit("NL")),
+)
+
+# Spine = one row per forecast origin: entity key + the label timestamp + target.
+labels_sdf = load_sdf.withColumn("zone", F.lit("NL")).select("zone", "timestamp", cfg.features.target)
+
+lookups = [FeatureLookup(table_name="main.default.nl_load_features",
+                         lookup_key="zone",
+                         timestamp_lookup_key="timestamp")]   # <-- as-of join, the key line
+training_set = fe.create_training_set(df=labels_sdf, feature_lookups=lookups,
+                                      label=cfg.features.target, exclude_columns=["zone", "timestamp"])
+```
+
+Two things make it *serving*-safe, not just training-safe: (a) store the **weather forecast issued at
+the origin**, not the later revised archive value, so training and serving see the same inputs; and
+(b) let the *same* `FeatureLookup`s drive `fe.score_batch(...)` online, so the deployed model reads
+exactly the features it was trained on. That parity — identical lookups offline and online — is the
+whole point of the Feature Store over a plain table.
+
+### 2. Serving calibrated intervals (CQR at inference)
+
+CQR's margin currently lives in the backtest. To actually *serve* calibrated bounds, register the
+full band and carry the margin with the model. Three options, cheapest to most robust:
+
+**(a) Static margin, refreshed per retrain.** After fitting, compute the margin `q` on the most recent
+calibration slice and ship it *inside* a `pyfunc` wrapper around the P10/P50/P90 models. Deterministic
+and trivial to serve; the only cost is the margin going slightly stale between retrains.
+
+```python
+class CQRForecaster(mlflow.pyfunc.PythonModel):
+    def __init__(self, models, margin):      # models = {0.1:.., 0.5:.., 0.9:..}
+        self.models, self.margin = models, margin
+    def predict(self, ctx, X):
+        p10, p50, p90 = (self.models[q].predict(X) for q in (0.1, 0.5, 0.9))
+        return pd.DataFrame({"p10": p10 - self.margin, "p50": p50, "p90": p90 + self.margin})
+
+margin = conformal.conformal_margin(
+    conformal.conformity_scores(y_cal, p10_cal, p90_cal), alpha=0.2)
+mlflow.pyfunc.log_model("model", python_model=CQRForecaster(models, margin),
+                        registered_model_name="nl_load_quantile_cqr")
+```
+
+**(b) Scheduled recalibration.** Decouple recalibration from retraining: a daily Databricks Job
+recomputes `q` on a rolling window of recent (actual, predicted-bound) pairs and writes it to a small
+`calibration` table (or a new model version / `@champion` alias). Serving reads the current `q`. This
+tracks drift at day resolution without touching the trees.
+
+**(c) Adaptive Conformal Inference (ACI).** For a streaming, non-exchangeable series the principled
+answer is [Gibbs & Candès 2021](https://arxiv.org/abs/2106.00170): nudge the effective miscoverage
+from realised errors, `α_{t+1} = α_t + γ·(α − err_t)`, so coverage self-corrects when the load
+regime shifts. This is the natural upgrade from the fixed calibration window used here, and would
+also address the median bias if paired with a calibration-set median shift.
+
+The honest default for this repo would be **(a)** — it's a small, testable change — with **(b)/(c)**
+as the drift-hardening step.
 
 ---
 
