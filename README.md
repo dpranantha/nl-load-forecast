@@ -1,5 +1,7 @@
 # NL Day-Ahead Load Forecasting — Probabilistic, Weather-Driven
 
+[![CI](https://github.com/dpranantha/nl-load-forecast/actions/workflows/ci.yml/badge.svg)](https://github.com/dpranantha/nl-load-forecast/actions/workflows/ci.yml)
+
 Day-ahead electricity **load** forecasting for the Netherlands, built as a *probabilistic*
 (quantile) problem rather than a single point prediction — because in a balancing context
 the cost of being wrong is asymmetric and a point forecast hides exactly the information we
