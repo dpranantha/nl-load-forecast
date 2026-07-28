@@ -8,6 +8,9 @@ data:
   weather_latitude: 52.10
   weather_longitude: 5.18
   cache_dir: "data"
+  # Databricks Feature Store table to read from when running on a cluster (leave null locally).
+  # e.g. "main.default.nl_load_features" — the table the notebook registers.
+  feature_table: null
 
 # --- Features ----------------------------------------------------------------
 features:

@@ -25,6 +25,56 @@ from .models.quantile_lgbm import MultiQuantileLGBM
 matplotlib.use("Agg")  # headless — set at import time, before any figure is created
 
 
+def _on_databricks() -> bool:
+    """True on a Databricks cluster — the same signal used to defer to managed MLflow tracking."""
+    return "DATABRICKS_RUNTIME_VERSION" in os.environ
+
+
+def _load_frame_local(cfg: Config) -> pd.DataFrame:
+    """Fetch load + weather from the public APIs and build the modelling frame (local default)."""
+    load = fetch_load(
+        cfg.data.country_code, cfg.data.start, cfg.data.end,
+        cfg.data.timezone, cfg.data.cache_dir,
+    )
+    weather = fetch_weather(
+        cfg.data.weather_latitude, cfg.data.weather_longitude,
+        cfg.data.start, cfg.data.end, cfg.features.weather_vars,
+        cfg.data.timezone, cfg.data.cache_dir,
+    )
+    return build_features(load, weather, cfg.features, horizon_hours=cfg.backtest.horizon_hours)
+
+
+def _load_frame_databricks(cfg: Config) -> pd.DataFrame:
+    """Read raw load+weather from the Databricks Feature Store, then run the *same*
+    ``build_features`` as local so metrics are identical regardless of where features come from.
+
+    Imports are lazy on purpose: ``databricks-feature-engineering`` only exists on a cluster, so
+    importing it at module top would break local runs and CI. This path is therefore not exercised
+    by CI — see the "Known limitations" section of the README.
+    """
+    from databricks.feature_engineering import FeatureEngineeringClient
+
+    fe = FeatureEngineeringClient()
+    # The notebook registers a table keyed by ``timestamp`` holding the raw joined load+weather.
+    pdf = (
+        fe.read_table(name=cfg.data.feature_table)
+        .toPandas()
+        .set_index("timestamp")
+        .sort_index()
+    )
+    load = pdf[[cfg.features.target]]
+    weather = pdf[cfg.features.weather_vars]
+    return build_features(load, weather, cfg.features, horizon_hours=cfg.backtest.horizon_hours)
+
+
+def _load_frame(cfg: Config) -> pd.DataFrame:
+    """Load the modelling frame, from the Feature Store on Databricks (if configured) or the
+    public APIs locally. Feature engineering is shared, so the two paths yield the same frame."""
+    if _on_databricks() and cfg.data.feature_table:
+        return _load_frame_databricks(cfg)
+    return _load_frame_local(cfg)
+
+
 def _quantile_cols(quantiles: list[float]) -> dict[float, str]:
     return {q: f"q{int(q * 100)}" for q in quantiles}
 
@@ -66,16 +116,7 @@ def _calibration_plot(bt: pd.DataFrame, quantiles: list[float], path: Path) -> N
 def run(config_path: str) -> dict[str, float]:
     cfg = Config.load(config_path)
 
-    load = fetch_load(
-        cfg.data.country_code, cfg.data.start, cfg.data.end,
-        cfg.data.timezone, cfg.data.cache_dir,
-    )
-    weather = fetch_weather(
-        cfg.data.weather_latitude, cfg.data.weather_longitude,
-        cfg.data.start, cfg.data.end, cfg.features.weather_vars,
-        cfg.data.timezone, cfg.data.cache_dir,
-    )
-    frame = build_features(load, weather, cfg.features, horizon_hours=cfg.backtest.horizon_hours)
+    frame = _load_frame(cfg)
 
     bt = rolling_backtest(frame, cfg.features.target, cfg.model, cfg.backtest)
     scores = _evaluate(bt, cfg.model.quantiles)

@@ -60,8 +60,15 @@ fe.create_table(
 # MAGIC
 # MAGIC The pipeline detects the Databricks runtime and logs to the **managed MLflow** tracking
 # MAGIC server here (locally it falls back to the SQLite backend from `conf/config.yaml`).
+# MAGIC
+# MAGIC It also reads features from the **Feature Store** table registered above instead of
+# MAGIC re-fetching from the public APIs — but only when `data.feature_table` is set in the config
+# MAGIC (and we're on a cluster). Point it at the table before running; otherwise `run()` falls back
+# MAGIC to fetching from ENTSO-E/Open-Meteo.
 
 # COMMAND ----------
+# To read features from the table registered above, set `data.feature_table` in conf/config.yaml
+# to "main.default.nl_load_features" (or edit the loaded Config here before calling run()).
 from nl_load_forecast.pipeline import run
 
 scores = run("../conf/config.yaml")

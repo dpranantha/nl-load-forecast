@@ -16,6 +16,10 @@ class DataConfig:
     weather_latitude: float
     weather_longitude: float
     cache_dir: str
+    # Optional Databricks Feature Store table (e.g. "main.default.nl_load_features"). When set
+    # AND running on a Databricks cluster, the pipeline reads raw load+weather from here instead
+    # of re-fetching from ENTSO-E/Open-Meteo. Ignored locally. See pipeline._load_frame.
+    feature_table: str | None = None
 
 
 @dataclass

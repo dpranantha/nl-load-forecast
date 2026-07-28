@@ -172,9 +172,87 @@ Open http://localhost:5000 → experiment **`nl-load-forecast`** → the latest 
 > `Library not loaded: @rpath/libomp.dylib`, run `brew install libomp` once. (`make test`
 > passes without it — the maths/feature tests don't load LightGBM.)
 
-On **Databricks** (Community Edition is free): import `notebooks/01_databricks_walkthrough.py`
-as a notebook — it demonstrates the Spark join, Feature Store registration, and MLflow logging
-end-to-end.
+---
+
+## Running on Databricks
+
+Import `notebooks/01_databricks_walkthrough.py` as a notebook — it demonstrates the **Spark join**,
+**Feature Store** registration, and **MLflow** logging end-to-end. The modelling logic is reused
+from the packaged `run()` so local and cluster runs produce identical metrics.
+
+**How the pipeline picks its data source.** `pipeline.run()` detects the cluster the same way it
+detects managed MLflow — via the `DATABRICKS_RUNTIME_VERSION` env var — and, if `data.feature_table`
+is set in `conf/config.yaml`, reads the raw load+weather features from the **Feature Store** instead
+of re-fetching from ENTSO-E/Open-Meteo. Locally the flag is absent, so it falls back to the public
+APIs. Feature engineering (`build_features`) is shared by both paths, so the frame is identical
+either way (`src/nl_load_forecast/pipeline.py`):
+
+```python
+def _on_databricks() -> bool:
+    return "DATABRICKS_RUNTIME_VERSION" in os.environ
+
+def _load_frame(cfg):
+    # On a cluster with a configured table, read features from the store; else fetch locally.
+    if _on_databricks() and cfg.data.feature_table:
+        from databricks.feature_engineering import FeatureEngineeringClient
+        fe = FeatureEngineeringClient()
+        pdf = fe.read_table(name=cfg.data.feature_table).toPandas() \
+                .set_index("timestamp").sort_index()
+        load, weather = pdf[[cfg.features.target]], pdf[cfg.features.weather_vars]
+        return build_features(load, weather, cfg.features, cfg.backtest.horizon_hours)
+    return _load_frame_local(cfg)   # ENTSO-E + Open-Meteo
+```
+
+To enable it, set `data.feature_table: "main.default.nl_load_features"` in the config and register
+that table once (the notebook does this with `fe.create_table(...)`).
+
+**Point-in-time lookup (the fuller pattern).** The snippet above reads a snapshot table. For a
+leakage-safe online/offline story you'd instead build a *training set* from `FeatureLookup`s joined
+to a label DataFrame on the timestamp key — this is the piece marked as future work below:
+
+```python
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
+
+fe = FeatureEngineeringClient()
+lookups = [FeatureLookup(table_name="main.default.nl_load_features",
+                         lookup_key="timestamp")]
+training_set = fe.create_training_set(df=labels_sdf,        # timestamp + load_mw
+                                      feature_lookups=lookups,
+                                      label="load_mw",
+                                      exclude_columns=["timestamp"])
+train_pdf = training_set.load_df().toPandas()
+```
+
+`create_training_set` records feature lineage and lets the *same* lookups be replayed at serving
+time, so the online model reads exactly the features it was trained on.
+
+---
+
+## Known limitations
+
+This is a learning project on public data, and a few things are deliberately scoped out. Naming
+them explicitly (rather than letting them read as "done"):
+
+- **The registered artifact is the P50 model only.** `run()` registers `models_[0.5]`
+  (`pipeline.py`) — the point/median model. The P10 and P90 models are trained and evaluated in the
+  backtest but not registered, so the deployed artifact serves a point forecast, not the full band.
+- **CQR is validated but not baked into the served model.** The conformal margin is computed and its
+  coverage is proven *inside the backtest* (`backtest/rolling.py`), but the registered model is raw
+  LightGBM — to serve calibrated intervals you must re-derive the margin from a recent calibration
+  slice at inference time. The backtest demonstrates calibration; the artifact does not yet carry it.
+- **Feature Store is a demo, not a round-trip, unless configured.** The notebook *registers* a
+  feature table, and `data.feature_table` lets the pipeline *read* from it on a cluster (above) — but
+  the leakage-safe **point-in-time lookup** path is illustrated, not wired in. Off Databricks the
+  Feature Store is not used at all.
+- **Median bias.** CQR calibrates the *interval*, not the point: the P50 empirical coverage sits near
+  0.41, i.e. the median runs slightly high. Symmetric CQR also over-covers (0.87 vs 0.80) because the
+  raw miscoverage is asymmetric.
+- **Single-point weather, single-node compute.** Weather is one KNMI reference point (De Bilt) as an
+  NL proxy, not a gridded field; training is single-node LightGBM (the Spark join is for the
+  data/Feature-Store step, not distributed model fitting). Both are fine at this data scale (~17k
+  hourly rows) but would need revisiting for a national, multi-zone model.
+
+These map onto the roadmap below.
 
 ---
 
@@ -267,12 +345,17 @@ native libs required.
 
 - [x] MVP: ENTSO-E + Open-Meteo → quantile model → rolling backtest → MLflow (tracking + registry)
 - [x] Interval calibration via CQR (coverage 0.49 → 0.87 with no loss of point accuracy)
+- [x] Flag-gated Feature Store read on Databricks (`data.feature_table` + `DATABRICKS_RUNTIME_VERSION`)
+- [ ] **Register the full band + bake in CQR** — register the P10/P90 models alongside P50, and wrap
+      the served model so it applies the conformal margin at inference. Today only P50 is registered
+      and the margin lives in the backtest (see [Known limitations](#known-limitations)).
 - [ ] **Asymmetric CQR + median de-bias** — the current symmetric margin slightly over-covers
       (0.87 vs 0.80) because the raw miscoverage is asymmetric, and CQR leaves the P50 bias
       (empirical 0.41) untouched. Per-side margins + a calibration-set median shift would fix both.
 - [ ] Multi-horizon (1–24h) with horizon-specific calibration
-- [ ] Databricks Feature Store registration + point-in-time lookup
+- [ ] Databricks Feature Store **point-in-time lookup** (`create_training_set`), not just a snapshot read
 - [ ] Drift check on incoming weather-feature distributions
+- [ ] Gridded / multi-zone weather instead of a single reference point
 - [ ] (Stretch) Serve the registered model behind FastAPI on AWS free-tier; artifacts in S3
 
 ---
