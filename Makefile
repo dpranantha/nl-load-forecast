@@ -26,4 +26,4 @@ backtest:
 	$(PY) scripts/run_backtest.py --config conf/config.yaml
 
 clean:
-	rm -rf mlruns reports/*.png __pycache__ .pytest_cache
+	rm -rf mlruns mlflow.db reports/*.png __pycache__ .pytest_cache

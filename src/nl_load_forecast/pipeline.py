@@ -5,11 +5,13 @@ MLflow, and registers the final model trained on the full window.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
 import mlflow
+import mlflow.lightgbm
 import pandas as pd
 
 from .backtest.rolling import rolling_backtest
@@ -83,12 +85,23 @@ def run(config_path: str) -> dict[str, float]:
     calib_path = reports / "calibration.png"
     _calibration_plot(bt, cfg.model.quantiles, calib_path)
 
+    # Print metrics before MLflow logging so results always surface, even if tracking fails.
+    print("Backtest metrics:")
+    for k, v in scores.items():
+        print(f"  {k:20s} {v:.4f}")
+
+    # Locally, use the configured backend (SQLite by default). On Databricks, MLflow tracking
+    # is managed by the platform, so leave it alone rather than redirecting to a driver-local DB.
+    if "DATABRICKS_RUNTIME_VERSION" not in os.environ and cfg.mlflow.tracking_uri:
+        mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
     mlflow.set_experiment(cfg.mlflow.experiment_name)
     with mlflow.start_run():
         mlflow.log_params({
             "quantiles": cfg.model.quantiles,
             "horizon_hours": cfg.backtest.horizon_hours,
             "n_folds": cfg.backtest.n_folds,
+            "conformalize": cfg.backtest.conformalize,
+            "calibration_days": cfg.backtest.calibration_days,
             **{f"lgbm_{k}": v for k, v in cfg.model.lgbm_params.items()},
         })
         mlflow.log_metrics(scores)
@@ -99,13 +112,12 @@ def run(config_path: str) -> dict[str, float]:
         final = MultiQuantileLGBM(cfg.model.quantiles, cfg.model.lgbm_params).fit(x_all, y_all)
         final.feature_importances().to_csv(reports / "feature_importances.csv")
         mlflow.log_artifact(str(reports / "feature_importances.csv"))
-        mlflow.sklearn.log_model(
+        # Native LightGBM flavor: the sklearn flavor serialises via skops, which rejects
+        # LightGBM boosters as "untrusted types". log the median (P50) model for reference.
+        mlflow.lightgbm.log_model(
             final.models_[0.5],
-            artifact_path="p50_model",
+            name="p50_model",
             registered_model_name=cfg.mlflow.registered_model_name,
         )
 
-    print("Backtest metrics:")
-    for k, v in scores.items():
-        print(f"  {k:20s} {v:.4f}")
     return scores

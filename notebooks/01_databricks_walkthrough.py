@@ -10,10 +10,9 @@
 # MAGIC or a Databricks secret.
 
 # COMMAND ----------
-# MAGIC %pip install entsoe-py lightgbm holidays python-dotenv
+# MAGIC %pip install entsoe-py lightgbm holidays python-dotenv mlflow
 
 # COMMAND ----------
-import pandas as pd
 from nl_load_forecast.config import Config
 from nl_load_forecast.data.entsoe import fetch_load
 from nl_load_forecast.data.weather import fetch_weather
@@ -58,6 +57,9 @@ fe.create_table(
 # COMMAND ----------
 # MAGIC %md ## Backtest + MLflow logging
 # MAGIC Reuses the packaged pipeline so the metrics match the local run exactly.
+# MAGIC
+# MAGIC The pipeline detects the Databricks runtime and logs to the **managed MLflow** tracking
+# MAGIC server here (locally it falls back to the SQLite backend from `conf/config.yaml`).
 
 # COMMAND ----------
 from nl_load_forecast.pipeline import run

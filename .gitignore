@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 .env
 mlruns/
+mlflow.db
 reports/*
+!reports/calibration.png
 data/*.parquet
 data/*.csv
 .pytest_cache/

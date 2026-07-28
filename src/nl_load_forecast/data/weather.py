@@ -35,20 +35,24 @@ def fetch_weather(
     if cache.exists():
         return pd.read_parquet(cache)
 
+    # Request in UTC (which has no DST gaps/overlaps) and convert to the target zone below.
+    # Fetching directly in a DST-observing zone makes Open-Meteo emit local wall-clock stamps
+    # that include the spring-forward gap hour (e.g. 2023-03-26 02:00 Europe/Amsterdam), which
+    # tz_localize cannot resolve (NonExistentTimeError).
     params = {
         "latitude": latitude,
         "longitude": longitude,
         "start_date": start,
         "end_date": end,
         "hourly": ",".join(variables),
-        "timezone": timezone,
+        "timezone": "UTC",
     }
     resp = requests.get(url, params=params, timeout=60)
     resp.raise_for_status()
     hourly = resp.json()["hourly"]
 
     df = pd.DataFrame(hourly)
-    df["timestamp"] = pd.to_datetime(df.pop("time")).dt.tz_localize(timezone)
+    df["timestamp"] = pd.to_datetime(df.pop("time")).dt.tz_localize("UTC").dt.tz_convert(timezone)
     df = df.set_index("timestamp").sort_index()
 
     df.to_parquet(cache)

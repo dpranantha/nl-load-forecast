@@ -41,12 +41,20 @@ class BacktestConfig:
     n_folds: int
     initial_train_days: int
     step_days: int
+    # Conformalized Quantile Regression: calibrate interval width on the most recent
+    # `calibration_days` of each training window. Set conformalize=False to compare
+    # against the raw (uncalibrated) quantile intervals.
+    conformalize: bool = True
+    calibration_days: int = 30
 
 
 @dataclass
 class MlflowConfig:
     experiment_name: str
     registered_model_name: str
+    # SQLite by default: the local file store is in maintenance mode in recent MLflow and
+    # does not support the model registry that ``registered_model_name`` relies on.
+    tracking_uri: str = "sqlite:///mlflow.db"
 
 
 @dataclass

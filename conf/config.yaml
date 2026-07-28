@@ -36,8 +36,13 @@ backtest:
   n_folds: 12              # rolling-origin folds
   initial_train_days: 180  # first training window
   step_days: 30            # advance the origin by this each fold
+  conformalize: true       # CQR: calibrate interval width for honest coverage
+  calibration_days: 30     # recent slice of each train window held out for calibration
 
 # --- MLflow ------------------------------------------------------------------
 mlflow:
   experiment_name: "nl-load-forecast"
   registered_model_name: "nl_load_quantile_lgbm"
+  # SQLite backend so the model registry works (the local file store does not support it).
+  # Inspect runs with: mlflow ui --backend-store-uri sqlite:///mlflow.db
+  tracking_uri: "sqlite:///mlflow.db"
