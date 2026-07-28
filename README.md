@@ -137,6 +137,28 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://localhost:5000
 > zero-setup one. On Databricks the pipeline auto-detects the runtime and uses the platform's
 > managed tracking instead.
 
+### Viewing runs in the MLflow UI
+
+Every `make backtest` logs one run — params, metrics, and the calibration plot — to `mlflow.db`.
+Browse them locally:
+
+```bash
+.venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://localhost:5000
+```
+
+Open http://localhost:5000 → experiment **`nl-load-forecast`** → the latest run. There you'll find:
+
+- **Metrics:** `interval_coverage`, `mean_pinball`, `crps`, `p50_mae`, `interval_width`.
+- **Params:** quantiles, LGBM hyper-params, `conformalize`, `calibration_days`.
+- **Artifacts:** `calibration.png` (P10/P50/P90 reliability).
+- **Models:** the P50 model registered as `nl_load_quantile_lgbm` (see the *Models* tab).
+
+> **Requires Python 3.12.** The MLflow UI server does not run on Python 3.14 — its FastAPI server
+> imports `importlib.abc.Traversable`, which was removed in 3.14. `make setup` pins the venv to
+> 3.12 (see the [Quickstart](#quickstart) note), so the command above works out of the box; if you
+> built the env another way, run it from a 3.12 interpreter. Tracking/logging during `make backtest`
+> is unaffected by this — only the UI server is.
+
 > **Using uv?** It's an optional, much faster drop-in for step 1. Install it once with
 > `brew install uv` (macOS) or `curl -LsSf https://astral.sh/uv/install.sh | sh`, then run
 > `make setup-uv` instead of `make setup`. Both create the same `.venv`, so every later step
