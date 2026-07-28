@@ -421,7 +421,7 @@ native libs required.
 | Calendar-aware features (NL holidays, cyclical encoding) | `_calendar_features` in `features/build.py`; tested against known Dutch holidays (Koningsdag, Kerstdag) in `test_features.py` |
 | Feature Store | notebook (Databricks Feature Engineering) |
 | Calibration as the metric that matters | Results table (raw 0.49 → CQR 0.87 coverage) + `reports/calibration.png` |
-| Testing discipline (unit + integration, CI) | 18 unit tests (mocked, synthetic), 2 live integration tests, CI on every push with `pytest -m "not integration"` |
+| Testing discipline (unit + integration, CI) | 23 unit tests (mocked, synthetic), 3 live integration tests, CI on every push with `pytest -m "not integration"` |
 
 ---
 
