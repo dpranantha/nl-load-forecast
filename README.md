@@ -48,9 +48,11 @@ every value is printed by the run and logged to MLflow.
 The raw quantile model is badly **over-confident** — its nominal 80% interval covers only 49% of
 actuals. Conformalized Quantile Regression (see below) restores coverage to a slightly-conservative
 0.87 *without touching point accuracy*, and improves both pinball loss and CRPS. The calibration
-plot (`reports/calibration.png`) shows the P10/P90 endpoints snapping onto the diagonal after CQR;
-the P50 point stays near 0.41, i.e. the median is still biased slightly high — a known, documented
-limitation (CQR calibrates the *interval*, not the point — see Roadmap).
+plot below shows the P10/P90 endpoints snapping onto the diagonal after CQR; the P50 point stays
+near 0.41, i.e. the median is still biased slightly high — a known, documented limitation (CQR
+calibrates the *interval*, not the point — see Roadmap).
+
+![Calibration plot: P10/P50/P90 reliability before vs after CQR](reports/calibration.png)
 
 **Baselines it must beat:** (1) seasonal naïve (load 168h ago), (2) P50-only GBM. If the quantile
 model doesn't beat seasonal naïve on pinball loss, something is wrong — that's the honesty check.
@@ -152,6 +154,8 @@ Open http://localhost:5000 → experiment **`nl-load-forecast`** → the latest 
 - **Params:** quantiles, LGBM hyper-params, `conformalize`, `calibration_days`.
 - **Artifacts:** `calibration.png` (P10/P50/P90 reliability).
 - **Models:** the P50 model registered as `nl_load_quantile_lgbm` (see the *Models* tab).
+
+![MLflow run: logged metrics for a backtest](docs/model-metrics.png)
 
 > **Requires Python 3.12.** The MLflow UI server does not run on Python 3.14 — its FastAPI server
 > imports `importlib.abc.Traversable`, which was removed in 3.14. `make setup` pins the venv to
